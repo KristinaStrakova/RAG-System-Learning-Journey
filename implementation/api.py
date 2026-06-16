@@ -51,8 +51,8 @@ Answer:""",
 
 # ── Globals (populated at startup) ───────────────────────────────────────────
 
-_chain     = None
 _retriever = None
+_llm_chain = None   # PROMPT | llm | parser  (no retriever — timed separately)
 
 
 def _find_index_dir() -> str:
@@ -77,7 +77,7 @@ def _format_docs(docs: list) -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _chain, _retriever
+    global _retriever, _llm_chain
 
     index_path = _find_index_dir()
     print(f"[startup] Loading embedding model ({EMBED_MODEL}) …")
@@ -98,12 +98,8 @@ async def lifespan(app: FastAPI):
     print(f"[startup] Connecting to Ollama ({LLM_MODEL}) …")
     llm = OllamaLLM(model=LLM_MODEL, temperature=0.2)
 
-    _chain = (
-        {"context": _retriever | _format_docs, "question": RunnablePassthrough()}
-        | PROMPT
-        | llm
-        | StrOutputParser()
-    )
+    # Only prompt → llm → parse; retrieval is done separately so we can time each step
+    _llm_chain = PROMPT | llm | StrOutputParser()
 
     print("[startup] API ready!")
     yield
@@ -139,12 +135,21 @@ async def chat(req: ChatRequest):
         raise HTTPException(status_code=400, detail="Question must not be empty.")
 
     try:
-        start = time.perf_counter()
+        t0 = time.perf_counter()
         source_docs = _retriever.invoke(question)
-        answer      = _chain.invoke(question)
-        elapsed     = round(time.perf_counter() - start, 2)
+        t1 = time.perf_counter()
+
+        context = _format_docs(source_docs)
+        answer  = _llm_chain.invoke({"context": context, "question": question})
+        t2 = time.perf_counter()
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+    timings = {
+        "retrieval": round(t1 - t0, 3),
+        "llm":       round(t2 - t1, 3),
+        "total":     round(t2 - t0, 3),
+    }
 
     sources = [
         {
@@ -156,7 +161,7 @@ async def chat(req: ChatRequest):
     ]
 
     return {
-        "answer":        answer,
-        "sources":       sources,
-        "response_time": elapsed,
+        "answer":  answer,
+        "sources": sources,
+        "timings": timings,
     }

@@ -17,7 +17,7 @@ from langchain_community.vectorstores import FAISS
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-DEFAULT_JSON   = "frieren_dataset.json"
+DEFAULT_JSON   = "frieren_dataset_both_seasons.json"
 INDEX_DIR      = "faiss_index"
 EMBED_MODEL    = "BAAI/bge-small-en-v1.5"   # fast, free, ~130 MB download
 CHUNK_SIZE     = 700   # characters (not tokens — keep headroom for special chars)

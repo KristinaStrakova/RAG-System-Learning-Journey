@@ -62,6 +62,40 @@ function SourceCard({ source, index, query }) {
   )
 }
 
+// ── Request timeline bar ───────────────────────────────────────────
+function TimingBar({ timings }) {
+  if (!timings) return null
+  const { retrieval, llm, total } = timings
+  const retPct = Math.round((retrieval / total) * 100)
+  const llmPct = 100 - retPct
+
+  return (
+    <div className="timing-wrap">
+      <div className="timing-track">
+        <div
+          className="timing-seg retrieval-seg"
+          style={{ width: `${retPct}%` }}
+          title={`Embed + FAISS search: ${retrieval}s`}
+        />
+        <div
+          className="timing-seg llm-seg"
+          style={{ width: `${llmPct}%` }}
+          title={`LLM generation: ${llm}s`}
+        />
+      </div>
+      <div className="timing-labels">
+        <span className="timing-label retrieval-label">
+          <span className="dot retrieval-dot" /> Retrieval&nbsp;{retrieval}s
+        </span>
+        <span className="timing-label llm-label">
+          <span className="dot llm-dot" /> LLM&nbsp;{llm}s
+        </span>
+        <span className="timing-total">Total&nbsp;{total}s</span>
+      </div>
+    </div>
+  )
+}
+
 // ── Animated typing dots ───────────────────────────────────────────────────
 function TypingDots() {
   return (
@@ -90,14 +124,14 @@ function ChatMessage({ msg, isActive, onClick }) {
       <div className="bubble">
         <p>{msg.content}</p>
         {!isUser && (
-          <div className="bubble-meta">
-            {msg.responseTime != null && (
-              <span className="time-badge">⏱ {msg.responseTime}s</span>
-            )}
-            {msg.sources?.length > 0 && (
-              <span className="sources-badge">{msg.sources.length} chunks</span>
-            )}
-          </div>
+          <>
+            <TimingBar timings={msg.timings} />
+            <div className="bubble-meta">
+              {msg.sources?.length > 0 && (
+                <span className="sources-badge">{msg.sources.length} chunks</span>
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -144,10 +178,10 @@ export default function App() {
       const data = await res.json()
       const botIdx = userIdx + 1
       setMessages(prev => [...prev, {
-        role:         'bot',
-        content:      data.answer,
-        responseTime: data.response_time,
-        sources:      data.sources ?? [],
+        role:    'bot',
+        content: data.answer,
+        timings: data.timings ?? null,
+        sources: data.sources ?? [],
       }])
       setActiveIdx(botIdx)
     } catch (err) {
@@ -168,8 +202,8 @@ export default function App() {
       {/* ── Left: Chat ──────────────────────────────────────────────────── */}
       <div className="chat-pane">
         <div className="chat-header">
-          <h1>Frieren Wiki Chat</h1>
-          <p>RAG · FAISS · Ollama</p>
+          <h1>Frieren Grimoire</h1>
+          <p>Chronicles Indexed with RAG · FAISS · Ollama</p>
         </div>
 
         <div className="messages-area">
