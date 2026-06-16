@@ -41,6 +41,139 @@ body {
   display: flex;
 }
 
+/* ── Show Picker Modal ─────────────────────────────────────────────────── */
+
+.show-picker-overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(165deg, #f4e6c9 0%, #e7d3aa 42%, #ddc291 100%);
+  z-index: 1000;
+}
+
+.show-picker-modal {
+  background: linear-gradient(180deg, rgba(239, 225, 195, 0.98), rgba(228, 206, 164, 0.96));
+  border: 2px solid var(--oak-deep);
+  border-radius: 20px;
+  padding: 48px 40px;
+  max-width: 500px;
+  width: 90%;
+  box-shadow: 0 20px 60px rgba(56, 37, 20, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  animation: modalSlideIn 0.4s ease-out;
+}
+
+.show-picker-modal h1 {
+  font-family: 'Cinzel', 'Times New Roman', serif;
+  font-size: 2rem;
+  letter-spacing: 0.08em;
+  color: var(--oak-deep);
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.picker-subtitle {
+  font-size: 1.1rem;
+  color: var(--ink-soft);
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
+.picker-loading,
+.picker-error {
+  text-align: center;
+  padding: 20px;
+  font-size: 1rem;
+  color: var(--ink-soft);
+}
+
+.picker-error code {
+  background: rgba(167, 127, 44, 0.2);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.show-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.show-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 20px;
+  background: linear-gradient(145deg, rgba(246, 236, 214, 0.9), rgba(233, 214, 175, 0.88));
+  border: 2px solid rgba(93, 58, 31, 0.3);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'EB Garamond', serif;
+  font-size: 1rem;
+  text-align: center;
+  color: var(--ink-soft);
+}
+
+.show-item:hover:not(:disabled) {
+  border-color: var(--gold);
+  transform: translateY(-2px);
+  background: linear-gradient(145deg, rgba(250, 240, 220, 0.95), rgba(240, 220, 180, 0.92));
+  box-shadow: 0 6px 16px rgba(61, 34, 16, 0.25);
+}
+
+.show-item:active:not(:disabled) {
+  background: linear-gradient(145deg, #6e3f1f, #4a2813);
+  color: #fbe9c7;
+  border-color: var(--gold);
+}
+
+.show-name {
+  font-weight: 600;
+}
+
+.picker-confirm-btn {
+  padding: 14px 32px;
+  background: linear-gradient(145deg, #7a4721, #552e15);
+  color: #f6e7c6;
+  border: 1px solid rgba(207, 175, 103, 0.56);
+  border-radius: 12px;
+  font-size: 1rem;
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+}
+
+.picker-confirm-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  filter: brightness(1.1);
+  box-shadow: 0 8px 20px rgba(61, 34, 16, 0.35);
+}
+
+.picker-confirm-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes modalSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+
 .layout {
   position: relative;
   display: flex;
@@ -93,6 +226,74 @@ body {
   color: var(--ink-faint);
   letter-spacing: 0.08em;
   margin-top: 4px;
+}
+
+.show-selector {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.current-show {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  font-weight: 500;
+  flex: 1;
+}
+
+.switch-show-btn {
+  padding: 6px 12px;
+  background: rgba(167, 127, 44, 0.15);
+  border: 1px solid rgba(93, 58, 31, 0.35);
+  color: var(--oak);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+}
+
+.switch-show-btn:hover {
+  background: rgba(167, 127, 44, 0.25);
+  border-color: var(--gold);
+  filter: brightness(1.05);
+}
+
+.show-selector {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.current-show {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  font-weight: 500;
+  flex: 1;
+}
+
+.switch-show-btn {
+  padding: 6px 12px;
+  background: rgba(167, 127, 44, 0.15);
+  border: 1px solid rgba(93, 58, 31, 0.35);
+  color: var(--oak);
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-family: 'Cinzel', serif;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-transform: uppercase;
+}
+
+.switch-show-btn:hover {
+  background: rgba(167, 127, 44, 0.25);
+  border-color: var(--gold);
+  filter: brightness(1.05);
 }
 
 .messages-area {

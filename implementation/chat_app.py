@@ -11,19 +11,26 @@ Usage:
 """
 
 import argparse
+import json
+import re
+from pathlib import Path
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_ollama import OllamaLLM
+from langchain_core.documents import Document
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-INDEX_DIR   = "faiss_index"
+SHOWS_DIR = "shows"
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"   # must match what you used in 1_build_index.py
 LLM_MODEL   = "mistral"                  # any model you've pulled in Ollama
 TOP_K       = 5                          # how many chunks to retrieve per query
+CHUNK_SIZE = 700
+CHUNK_OVERLAP = 100
 
 # ── Prompt ────────────────────────────────────────────────────────────────────
 
@@ -63,9 +70,91 @@ def show_sources(docs: list) -> None:
         print("\n  Sources used:")
         print("\n".join(sources))
 
+
+def slugify(name: str) -> str:
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", name.lower()).strip("_")
+    return slug or "dataset"
+
+
+def show_records(shows_dir: str) -> list[dict]:
+    path = Path(shows_dir)
+    if not path.exists():
+        return []
+
+    records = []
+    for show_folder in sorted(path.iterdir()):
+        if not show_folder.is_dir():
+            continue
+        faiss_index = show_folder / "faiss_index"
+        dataset_file = show_folder / "dataset.json"
+        # Only include shows that have both a FAISS index and dataset
+        if faiss_index.exists() and dataset_file.exists():
+            records.append({
+                "id": slugify(show_folder.name),
+                "name": show_folder.name,
+                "folder": str(show_folder),
+                "file": str(dataset_file),
+                "index": str(faiss_index),
+            })
+    return records
+
+
+def choose_show(shows: list[dict]) -> dict | None:
+    if not shows:
+        return None
+
+    print("\nAvailable shows:")
+    for i, show in enumerate(shows, start=1):
+        print(f"  {i}. {show['name']} ({show['id']})")
+
+    while True:
+        raw = input("Select show number (or press Enter for #1): ").strip()
+        if raw == "":
+            return shows[0]
+        if raw.isdigit() and 1 <= int(raw) <= len(shows):
+            return shows[int(raw) - 1]
+        print("Invalid selection. Try again.")
+
+
+def to_documents(data: list[dict]) -> list[Document]:
+    docs = []
+    for record in data:
+        title = record.get("title", "")
+        content = record.get("content", "")
+        url = record.get("url", "")
+
+        if len(content.strip()) < 80:
+            continue
+
+        docs.append(Document(
+            page_content=f"Article: {title}\n\n{content}",
+            metadata={"title": title, "url": url},
+        ))
+    return docs
+
+
+def chunk_documents(docs: list[Document]) -> list[Document]:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        separators=["\n\n", "\n", ". ", " ", ""],
+    )
+    return splitter.split_documents(docs)
+
+
+def load_show_index(embeddings, show: dict):
+    index_dir = show["index"]
+    print(f"Loading FAISS index for '{show['name']}' from '{index_dir}' …")
+    vectorstore = FAISS.load_local(
+        index_dir,
+        embeddings,
+        allow_dangerous_deserialization=True,
+    )
+    return vectorstore
+
 # ── Setup ─────────────────────────────────────────────────────────────────────
 
-def load_chain(index_dir: str, embed_model: str, llm_model: str, top_k: int):
+def load_chain(embed_model: str, llm_model: str, top_k: int, show: dict | None = None):
     print("Loading embedding model …")
     embeddings = HuggingFaceEmbeddings(
         model_name=embed_model,
@@ -73,18 +162,15 @@ def load_chain(index_dir: str, embed_model: str, llm_model: str, top_k: int):
         encode_kwargs={"normalize_embeddings": True},
     )
 
-    print(f"Loading FAISS index from '{index_dir}/' …")
-    vectorstore = FAISS.load_local(
-        index_dir,
-        embeddings,
-        allow_dangerous_deserialization=True,   # safe — you built this index yourself
-    )
+    if show is None:
+        raise RuntimeError("No show selected.")
+
+    vectorstore = load_show_index(embeddings, show)
     retriever = vectorstore.as_retriever(search_kwargs={"k": top_k})
 
     print(f"Connecting to Ollama ({llm_model}) …")
     llm = OllamaLLM(model=llm_model, temperature=0.2)
 
-    # LCEL chain:  retrieved docs → format → prompt → llm → parse
     chain = (
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
         | PROMPT
@@ -130,12 +216,32 @@ def chat(chain, retriever) -> None:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--index", default=INDEX_DIR,       help="FAISS index folder")
-    parser.add_argument("--model", default=LLM_MODEL,       help="Ollama model name")
+    parser.add_argument("--shows-dir", default=SHOWS_DIR, help="Folder with show folders")
+    parser.add_argument("--model", default=LLM_MODEL, help="Ollama model name")
     parser.add_argument("--top-k", default=TOP_K, type=int, help="Chunks to retrieve")
+    parser.add_argument("--show", default=None, help="Show id")
     args = parser.parse_args()
 
-    chain, retriever = load_chain(args.index, EMBED_MODEL, args.model, args.top_k)
+    shows = show_records(args.shows_dir)
+    selected = None
+    if args.show:
+        selected = next((s for s in shows if s["id"] == args.show), None)
+        if selected is None:
+            print(f"Show '{args.show}' not found in '{args.shows_dir}'.")
+            return
+    elif shows:
+        selected = choose_show(shows)
+
+    if selected is None:
+        print("No show selected.")
+        return
+
+    chain, retriever = load_chain(
+        EMBED_MODEL,
+        args.model,
+        args.top_k,
+        show=selected,
+    )
     chat(chain, retriever)
 
 

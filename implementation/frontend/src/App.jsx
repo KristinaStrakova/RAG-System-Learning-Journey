@@ -1,5 +1,37 @@
 import { useState, useRef, useEffect } from 'react'
 
+// ── Show Picker Screen ───────────────────────────────────────────────────
+function ShowPicker({ shows, loading, onSelect }) {
+  return (
+    <div className="show-picker-overlay">
+      <div className="show-picker-modal">
+        <h1>Frieren Grimoire</h1>
+        <p className="picker-subtitle">Select a show to begin</p>
+
+        {loading ? (
+          <div className="picker-loading">Loading shows…</div>
+        ) : shows.length === 0 ? (
+          <div className="picker-error">
+            No shows found in <code>/shows</code> folder
+          </div>
+        ) : (
+          <div className="show-list">
+            {shows.map(show => (
+              <button
+                key={show.id}
+                className="show-item"
+                onClick={() => onSelect(show.id)}
+              >
+                <span className="show-name">{show.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── Highlight query words inside a chunk of text ───────────────────────────
 function HighlightedText({ text, query }) {
   if (!query?.trim()) return <>{text}</>
@@ -144,12 +176,53 @@ export default function App() {
   const [input,     setInput]     = useState('')
   const [loading,   setLoading]   = useState(false)
   const [activeIdx, setActiveIdx] = useState(null)
+  const [shows, setShows] = useState([])
+  const [selectedShow, setSelectedShow] = useState('')
+  const [showsLoading, setShowsLoading] = useState(true)
   const bottomRef = useRef(null)
 
   // auto-scroll chat to bottom
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  // load show choices from backend
+  useEffect(() => {
+    let alive = true
+
+    async function loadShows() {
+      try {
+        const res = await fetch('/shows')
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        const items = data.shows ?? []
+
+        if (!alive) return
+        setShows(items)
+      } catch {
+        if (!alive) return
+        setShows([])
+      } finally {
+        if (alive) setShowsLoading(false)
+      }
+    }
+
+    loadShows()
+    return () => {
+      alive = false
+    }
+  }, [])
+
+  // Handle show selection from picker
+  const handleShowSelect = (showId) => {
+    setSelectedShow(showId)
+    setMessages([])
+  }
+
+  // Show picker if no show selected yet
+  if (!selectedShow) {
+    return <ShowPicker shows={shows} loading={showsLoading} onSelect={handleShowSelect} />
+  }
 
   // sources + query for the currently selected bot message
   const activeSources = activeIdx !== null ? (messages[activeIdx]?.sources ?? null) : null
@@ -169,7 +242,10 @@ export default function App() {
       const res = await fetch('/chat', {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ question }),
+        body:    JSON.stringify({
+          question,
+          show: selectedShow || null,
+        }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }))
@@ -204,12 +280,18 @@ export default function App() {
         <div className="chat-header">
           <h1>Frieren Grimoire</h1>
           <p>Chronicles Indexed with RAG · FAISS · Ollama</p>
+          <div className="show-selector">
+            <span className="current-show">{shows.find(s => s.id === selectedShow)?.name || selectedShow}</span>
+            <button className="switch-show-btn" onClick={() => setSelectedShow('')} title="Switch to different show">
+              Switch to different show
+            </button>
+          </div>
         </div>
 
         <div className="messages-area">
           {messages.length === 0 && !loading && (
             <div className="placeholder">
-              Ask anything about <em>Frieren: Beyond Journey's End</em>
+              Ask anything from the selected show
             </div>
           )}
 
@@ -235,11 +317,14 @@ export default function App() {
           <input
             value={input}
             onChange={e => setInput(e.target.value)}
-            placeholder="Ask about Frieren…"
+            placeholder="Ask a question from the selected dataset…"
             disabled={loading}
             autoFocus
           />
-          <button type="submit" disabled={loading || !input.trim()}>
+          <button
+            type="submit"
+            disabled={loading || !input.trim()}
+          >
             Send
           </button>
         </form>
