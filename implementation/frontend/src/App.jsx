@@ -1,12 +1,33 @@
 import { useState, useRef, useEffect } from 'react'
 
+const THEME_OPTIONS = [
+  { id: 'archive', name: 'Archive' },
+  { id: 'cyber', name: 'Cyber Grid' },
+  { id: 'aether', name: 'Aether Bloom' },
+  { id: 'sunset', name: 'Sunset Circuit' },
+  { id: 'thrones', name: 'Winter & Fire' },
+]
+
 // ── Show Picker Screen ───────────────────────────────────────────────────
-function ShowPicker({ shows, loading, onSelect, onAddShow }) {
+function ShowPicker({ shows, loading, onSelect, onAddShow, theme, onThemeChange }) {
   return (
-    <div className="show-picker-overlay">
+    <div className={`show-picker-overlay theme-${theme}`}>
       <div className="show-picker-modal">
         <h1>FandomWiki RAG</h1>
         <p className="picker-subtitle">Select a show to begin</p>
+        <div className="theme-row">
+          <label htmlFor="picker-theme-select">Theme</label>
+          <select
+            id="picker-theme-select"
+            className="theme-select"
+            value={theme}
+            onChange={e => onThemeChange(e.target.value)}
+          >
+            {THEME_OPTIONS.map(option => (
+              <option key={option.id} value={option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
 
         {loading ? (
           <div className="picker-loading">Loading shows…</div>
@@ -39,6 +60,8 @@ function ShowPicker({ shows, loading, onSelect, onAddShow }) {
 function AddShowPanel({
   fandomUrl,
   setFandomUrl,
+  showName,
+  setShowName,
   pages,
   pageFilter,
   setPageFilter,
@@ -51,17 +74,46 @@ function AddShowPanel({
   onBack,
   pagesLoading,
   creatingShow,
+  createProgress,
+  processedChapters,
   error,
+  theme,
+  onThemeChange,
 }) {
   const filteredPages = pageFilter.trim()
     ? pages.filter(page => page.title.toLowerCase().includes(pageFilter.toLowerCase()))
     : pages
+  const progressPct = createProgress?.total
+    ? Math.round((createProgress.current / createProgress.total) * 100)
+    : 0
 
   return (
-    <div className="show-picker-overlay">
+    <div className={`show-picker-overlay add-show-overlay theme-${theme}`}>
       <div className="show-picker-modal add-show-modal">
-        <h1>Add A Show</h1>
+        <div className="add-show-header">
+          <button className="back-btn action-btn action-back" onClick={onBack} disabled={pagesLoading || creatingShow}>
+            <span className="btn-icon">&lt; </span>
+            <span className="btn-label">Back to show list</span>
+          </button>
+          <h1>Add A Show</h1>
+          <span className="add-show-header-spacer" aria-hidden="true" />
+        </div>
+
         <p className="picker-subtitle">Paste any Fandom URL and pick chapters to include</p>
+        <div className="theme-row">
+          <label htmlFor="add-theme-select">Theme</label>
+          <select
+            id="add-theme-select"
+            className="theme-select"
+            value={theme}
+            onChange={e => onThemeChange(e.target.value)}
+            disabled={pagesLoading || creatingShow}
+          >
+            {THEME_OPTIONS.map(option => (
+              <option key={option.id} value={option.id}>{option.name}</option>
+            ))}
+          </select>
+        </div>
 
         <div className="add-show-input-row">
           <input
@@ -70,8 +122,13 @@ function AddShowPanel({
             placeholder="https://deadpool.fandom.com/wiki/Special:AllPages"
             disabled={pagesLoading || creatingShow}
           />
-          <button onClick={onLoadPages} disabled={!fandomUrl.trim() || pagesLoading || creatingShow}>
-            {pagesLoading ? 'Loading…' : 'Load chapters'}
+          <button
+            className="action-btn action-load"
+            onClick={onLoadPages}
+            disabled={!fandomUrl.trim() || pagesLoading || creatingShow}
+          >
+            <span className="btn-icon">{'>> '}</span>
+            <span className="btn-label">{pagesLoading ? 'Loading…' : 'Load chapters'}</span>
           </button>
         </div>
 
@@ -79,6 +136,17 @@ function AddShowPanel({
 
         {pages.length > 0 && (
           <>
+            <div className="show-name-row">
+              <label htmlFor="show-name-input">Saved show name</label>
+              <input
+                id="show-name-input"
+                value={showName}
+                onChange={e => setShowName(e.target.value)}
+                placeholder="deadpool"
+                disabled={creatingShow}
+              />
+            </div>
+
             <div className="chapter-toolbar">
               <input
                 value={pageFilter}
@@ -86,11 +154,21 @@ function AddShowPanel({
                 placeholder="Filter chapters"
                 disabled={creatingShow}
               />
-              <button onClick={onSelectAllFiltered} disabled={filteredPages.length === 0 || creatingShow}>
-                Select visible
+              <button
+                className="action-btn action-secondary"
+                onClick={onSelectAllFiltered}
+                disabled={filteredPages.length === 0 || creatingShow}
+              >
+                <span className="btn-icon">+ </span>
+                <span className="btn-label">Select visible</span>
               </button>
-              <button onClick={onClearSelection} disabled={selectedTitles.size === 0 || creatingShow}>
-                Clear
+              <button
+                className="action-btn action-clear"
+                onClick={onClearSelection}
+                disabled={selectedTitles.size === 0 || creatingShow}
+              >
+                <span className="btn-icon">x </span>
+                <span className="btn-label">Clear</span>
               </button>
             </div>
 
@@ -112,19 +190,54 @@ function AddShowPanel({
               ))}
             </div>
 
-            <button
-              className="create-show-btn"
-              onClick={onCreateShow}
-              disabled={selectedTitles.size === 0 || creatingShow}
-            >
-              {creatingShow ? 'Creating show…' : 'Create show from selected chapters'}
-            </button>
+            <div className="add-show-actions">
+              <button
+                className="create-show-btn action-btn action-create"
+                onClick={onCreateShow}
+                disabled={selectedTitles.size === 0 || creatingShow}
+              >
+                <span className="btn-icon">* </span>
+                <span className="btn-label">{creatingShow ? 'Creating show…' : 'Create show from selected chapters'}</span>
+              </button>
+            </div>
+
+            {creatingShow && createProgress && (
+              <div className="scrape-progress-wrap">
+                <div className="scrape-progress-head">
+                  <span className="scrape-progress-label">
+                    {createProgress.stage === 'indexing' ? 'Indexing dataset...' : 'Scraping chapters...'}
+                  </span>
+                  <span className="scrape-progress-value">
+                    {createProgress.current}/{createProgress.total} ({progressPct}%)
+                  </span>
+                </div>
+
+                <div className="scrape-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax={createProgress.total || 1} aria-valuenow={createProgress.current}>
+                  <div className="scrape-progress-fill" style={{ width: `${progressPct}%` }} />
+                </div>
+
+                <div className="scrape-progress-current">
+                  Current: {createProgress.title || 'Preparing...'}
+                </div>
+
+                <div className="scrape-progress-stats">
+                  Kept: {createProgress.kept_pages ?? 0} | Skipped: {createProgress.skipped_pages ?? 0}
+                </div>
+
+                {processedChapters.length > 0 && (
+                  <div className="scrape-progress-log">
+                    {processedChapters.map((entry, idx) => (
+                      <div key={`${entry.title}-${idx}`} className={`scrape-progress-item ${entry.stage}`}>
+                        <span className="scrape-progress-item-mark">{entry.stage === 'kept' ? '+' : '-'}</span>
+                        <span className="scrape-progress-item-text">{entry.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
-
-        <button className="back-btn" onClick={onBack} disabled={pagesLoading || creatingShow}>
-          Back to show list
-        </button>
       </div>
     </div>
   )
@@ -279,13 +392,21 @@ export default function App() {
   const [showsLoading, setShowsLoading] = useState(true)
   const [pickerMode, setPickerMode] = useState('select')
   const [fandomUrl, setFandomUrl] = useState('')
+  const [showName, setShowName] = useState('')
   const [pages, setPages] = useState([])
   const [pageFilter, setPageFilter] = useState('')
   const [selectedTitles, setSelectedTitles] = useState(new Set())
   const [pagesLoading, setPagesLoading] = useState(false)
   const [creatingShow, setCreatingShow] = useState(false)
+  const [createProgress, setCreateProgress] = useState(null)
+  const [processedChapters, setProcessedChapters] = useState([])
   const [addShowError, setAddShowError] = useState('')
+  const [theme, setTheme] = useState(() => localStorage.getItem('fw_theme') || 'archive')
   const bottomRef = useRef(null)
+
+  useEffect(() => {
+    localStorage.setItem('fw_theme', theme)
+  }, [theme])
 
   // auto-scroll chat to bottom
   useEffect(() => {
@@ -364,6 +485,7 @@ export default function App() {
         throw new Error(data.detail || `HTTP ${res.status}`)
       }
       setPages(data.pages ?? [])
+      setShowName(prev => prev.trim() ? prev : (data.suggested_show_name ?? ''))
     } catch (err) {
       setAddShowError(err.message ?? 'Could not load chapters from the provided URL.')
     } finally {
@@ -376,18 +498,103 @@ export default function App() {
 
     setCreatingShow(true)
     setAddShowError('')
+    setProcessedChapters([])
+    setCreateProgress({
+      current: 0,
+      total: selectedTitles.size,
+      title: 'Starting chapter scrape...',
+      stage: 'start',
+      kept_pages: 0,
+      skipped_pages: 0,
+    })
+
     try {
-      const res = await fetch('/shows/create-from-fandom', {
+      const res = await fetch('/shows/create-from-fandom/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           fandom_url: fandomUrl.trim(),
           selected_titles: Array.from(selectedTitles),
+          show_name: showName.trim() || null,
         }),
       })
-      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
         throw new Error(data.detail || `HTTP ${res.status}`)
+      }
+      if (!res.body) {
+        throw new Error('The server did not provide a progress stream.')
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let streamError = ''
+      let createdShow = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        for (const rawLine of lines) {
+          const line = rawLine.trim()
+          if (!line) continue
+
+          let event
+          try {
+            event = JSON.parse(line)
+          } catch {
+            continue
+          }
+
+          if (event.type === 'error') {
+            streamError = event.detail || 'Failed while creating show.'
+            continue
+          }
+
+          if (event.type === 'done') {
+            createdShow = event.show || null
+            setCreateProgress(prev => ({
+              ...(prev || {}),
+              current: prev?.total || selectedTitles.size,
+              total: prev?.total || selectedTitles.size,
+              title: 'Completed',
+              stage: 'done',
+              kept_pages: event.kept_pages ?? prev?.kept_pages ?? 0,
+              skipped_pages: event.skipped_pages ?? prev?.skipped_pages ?? 0,
+            }))
+            continue
+          }
+
+          if (event.type === 'start' || event.type === 'progress' || event.type === 'indexing') {
+            setCreateProgress({
+              current: event.current ?? 0,
+              total: event.total ?? selectedTitles.size,
+              title: event.title ?? '',
+              stage: event.stage ?? event.type,
+              kept_pages: event.kept_pages ?? 0,
+              skipped_pages: event.skipped_pages ?? 0,
+            })
+
+            if (event.type === 'progress' && (event.stage === 'kept' || event.stage === 'skipped')) {
+              setProcessedChapters(prev => {
+                const next = [{ title: event.title, stage: event.stage }, ...prev]
+                return next.slice(0, 8)
+              })
+            }
+          }
+        }
+      }
+
+      if (streamError) {
+        throw new Error(streamError)
+      }
+      if (!createdShow?.id) {
+        throw new Error('Show creation did not complete correctly.')
       }
 
       await loadShows()
@@ -396,7 +603,10 @@ export default function App() {
       setSelectedTitles(new Set())
       setPageFilter('')
       setFandomUrl('')
-      handleShowSelect(data.show?.id || '')
+      setShowName('')
+      setCreateProgress(null)
+      setProcessedChapters([])
+      handleShowSelect(createdShow.id || '')
     } catch (err) {
       setAddShowError(err.message ?? 'Could not create show from selected chapters.')
     } finally {
@@ -410,6 +620,9 @@ export default function App() {
     setSelectedTitles(new Set())
     setPageFilter('')
     setAddShowError('')
+    setShowName('')
+    setCreateProgress(null)
+    setProcessedChapters([])
   }
 
   // Show picker if no show selected yet
@@ -419,6 +632,8 @@ export default function App() {
         <AddShowPanel
           fandomUrl={fandomUrl}
           setFandomUrl={setFandomUrl}
+          showName={showName}
+          setShowName={setShowName}
           pages={pages}
           pageFilter={pageFilter}
           setPageFilter={setPageFilter}
@@ -431,7 +646,11 @@ export default function App() {
           onBack={handleBackToShowList}
           pagesLoading={pagesLoading}
           creatingShow={creatingShow}
+          createProgress={createProgress}
+          processedChapters={processedChapters}
           error={addShowError}
+          theme={theme}
+          onThemeChange={setTheme}
         />
       )
     }
@@ -442,6 +661,8 @@ export default function App() {
         loading={showsLoading}
         onSelect={handleShowSelect}
         onAddShow={() => setPickerMode('add')}
+        theme={theme}
+        onThemeChange={setTheme}
       />
     )
   }
@@ -495,7 +716,7 @@ export default function App() {
   }
 
   return (
-    <div className="layout">
+    <div className={`layout theme-${theme}`}>
 
       {/* ── Left: Chat ──────────────────────────────────────────────────── */}
       <div className="chat-pane">
@@ -504,6 +725,16 @@ export default function App() {
           <p>Chronicles Indexed with RAG · FAISS · Ollama</p>
           <div className="show-selector">
             <span className="current-show">{shows.find(s => s.id === selectedShow)?.name || selectedShow}</span>
+            <select
+              className="theme-select"
+              value={theme}
+              onChange={e => setTheme(e.target.value)}
+              title="Change theme"
+            >
+              {THEME_OPTIONS.map(option => (
+                <option key={option.id} value={option.id}>{option.name}</option>
+              ))}
+            </select>
             <button className="switch-show-btn" onClick={() => setSelectedShow('')} title="Switch to different show">
               Switch to different show
             </button>

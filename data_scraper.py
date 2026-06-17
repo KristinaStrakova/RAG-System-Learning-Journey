@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 from urllib.parse import quote, urlparse
@@ -48,6 +49,27 @@ def wiki_api_url(wiki_base: str) -> str:
 def should_skip_title(title: str) -> bool:
     normalized = title.lower()
     return any(term in normalized for term in EXCLUDED_TITLE_TERMS)
+
+
+def build_progress_line(current: int, total: int, title: str) -> str:
+    """Build a single-line progress bar that includes the current page title."""
+    safe_total = max(total, 1)
+    ratio = max(0.0, min(1.0, current / safe_total))
+
+    terminal_width = shutil.get_terminal_size((100, 20)).columns
+    bar_width = 28
+    filled = int(bar_width * ratio)
+    bar = "#" * filled + "-" * (bar_width - filled)
+
+    compact_title = re.sub(r"\s+", " ", title).strip()
+    prefix = f"[progress] |{bar}| {current:>3}/{safe_total:<3} {ratio * 100:6.2f}% - "
+
+    max_title_len = max(10, terminal_width - len(prefix) - 1)
+    if len(compact_title) > max_title_len:
+        compact_title = compact_title[: max_title_len - 3] + "..."
+
+    line = prefix + compact_title
+    return line[: terminal_width - 1].ljust(terminal_width - 1)
 
 
 def fetch_json(api_url: str, params: dict, max_retries: int = MAX_RETRIES):
@@ -217,8 +239,9 @@ def main():
     print(f"[info] Selected {len(selected_titles)} pages to scrape.")
 
     dataset = []
+    total_titles = len(selected_titles)
     for index, title in enumerate(selected_titles, start=1):
-        print(f"[{index}/{len(selected_titles)}] Fetching: {title}")
+        print(build_progress_line(index - 1, total_titles, f"Loading: {title}"), end="\r", flush=True)
         content = get_page_content(wiki_base, title)
 
         if content and len(content) >= 80:
@@ -229,6 +252,9 @@ def main():
                     "url": f"{wiki_base}{quote(title.replace(' ', '_'))}",
                 }
             )
+
+        end_char = "\n" if index == total_titles else "\r"
+        print(build_progress_line(index, total_titles, f"Processed: {title}"), end=end_char, flush=True)
 
         time.sleep(REQUEST_DELAY_SECONDS)
 

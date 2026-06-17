@@ -25,6 +25,7 @@ import requests
 from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -281,6 +282,153 @@ def _create_show_from_selected_titles(
         raise HTTPException(status_code=500, detail=f"Failed to create show: {exc}")
 
 
+def _stream_create_show_from_selected_titles(
+    fandom_url: str,
+    selected_titles: list[str],
+    show_name: str | None = None,
+):
+    global _embeddings
+
+    show_dir: Path | None = None
+    created_show_dir = False
+
+    try:
+        if _embeddings is None:
+            raise HTTPException(status_code=503, detail="Embeddings are not ready yet. Try again in a moment.")
+
+        wiki_base, suggested_show_name = _normalize_fandom_base(fandom_url)
+        folder_name = _slugify(show_name or suggested_show_name)
+        if not folder_name:
+            raise HTTPException(status_code=400, detail="Show name is invalid.")
+
+        cleaned_titles = [t.strip() for t in selected_titles if t and t.strip()]
+        if not cleaned_titles:
+            raise HTTPException(status_code=400, detail="Select at least one chapter/page.")
+
+        shows_dir = _find_shows_dir()
+        shows_dir.mkdir(parents=True, exist_ok=True)
+        show_dir = shows_dir / folder_name
+
+        if show_dir.exists():
+            raise HTTPException(status_code=400, detail=f"Show '{folder_name}' already exists.")
+
+        show_dir.mkdir(parents=True, exist_ok=False)
+        created_show_dir = True
+
+        records: list[dict[str, str]] = []
+        skipped = 0
+        total = len(cleaned_titles)
+
+        yield {
+            "type": "start",
+            "current": 0,
+            "total": total,
+            "title": "Starting chapter scrape...",
+            "stage": "start",
+            "kept_pages": 0,
+            "skipped_pages": 0,
+        }
+
+        for index, title in enumerate(cleaned_titles, start=1):
+            try:
+                content, page_url = _fetch_page_content(wiki_base, title)
+            except Exception:
+                skipped += 1
+                yield {
+                    "type": "progress",
+                    "current": index,
+                    "total": total,
+                    "title": title,
+                    "stage": "skipped",
+                    "reason": "request_failed",
+                    "kept_pages": len(records),
+                    "skipped_pages": skipped,
+                }
+                continue
+
+            if not content or len(content) < 80:
+                skipped += 1
+                yield {
+                    "type": "progress",
+                    "current": index,
+                    "total": total,
+                    "title": title,
+                    "stage": "skipped",
+                    "reason": "insufficient_content",
+                    "kept_pages": len(records),
+                    "skipped_pages": skipped,
+                }
+                continue
+
+            records.append({
+                "title": title,
+                "content": content,
+                "url": page_url,
+            })
+
+            yield {
+                "type": "progress",
+                "current": index,
+                "total": total,
+                "title": title,
+                "stage": "kept",
+                "kept_pages": len(records),
+                "skipped_pages": skipped,
+            }
+
+        if not records:
+            raise HTTPException(status_code=400, detail="No usable content found from selected pages.")
+
+        yield {
+            "type": "indexing",
+            "current": total,
+            "total": total,
+            "title": "Building FAISS index...",
+            "stage": "indexing",
+            "kept_pages": len(records),
+            "skipped_pages": skipped,
+        }
+
+        dataset_path = show_dir / "dataset.json"
+        with dataset_path.open("w", encoding="utf-8") as handle:
+            json.dump(records, handle, ensure_ascii=False, indent=2)
+
+        docs = _to_documents(records)
+        chunks = _chunk_documents(docs)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Selected pages did not produce enough content to index.")
+
+        vectorstore = FAISS.from_documents(chunks, _embeddings)
+        index_dir = show_dir / "faiss_index"
+        index_dir.mkdir(parents=True, exist_ok=True)
+        vectorstore.save_local(str(index_dir))
+
+        show_id = _slugify(folder_name)
+        _dataset_retrievers.pop(show_id, None)
+
+        yield {
+            "type": "done",
+            "show": {"id": show_id, "name": folder_name},
+            "kept_pages": len(records),
+            "skipped_pages": skipped,
+            "all_pages_url": f"{wiki_base}Special:AllPages",
+        }
+    except HTTPException as exc:
+        if created_show_dir and show_dir is not None:
+            shutil.rmtree(show_dir, ignore_errors=True)
+        yield {
+            "type": "error",
+            "detail": str(exc.detail),
+        }
+    except Exception as exc:
+        if created_show_dir and show_dir is not None:
+            shutil.rmtree(show_dir, ignore_errors=True)
+        yield {
+            "type": "error",
+            "detail": f"Failed to create show: {exc}",
+        }
+
+
 def _show_records() -> list[dict]:
     """Find all shows with pre-built FAISS indexes."""
     shows_dir = _find_shows_dir()
@@ -467,6 +615,19 @@ async def create_show_from_fandom(req: CreateShowFromFandomRequest):
         "skipped_pages": show["skipped_pages"],
         "all_pages_url": show["all_pages_url"],
     }
+
+
+@app.post("/shows/create-from-fandom/stream")
+async def create_show_from_fandom_stream(req: CreateShowFromFandomRequest):
+    def event_stream():
+        for event in _stream_create_show_from_selected_titles(
+            fandom_url=req.fandom_url,
+            selected_titles=req.selected_titles,
+            show_name=req.show_name,
+        ):
+            yield json.dumps(event, ensure_ascii=False) + "\n"
+
+    return StreamingResponse(event_stream(), media_type="application/x-ndjson")
 
 
 @app.get("/health")
