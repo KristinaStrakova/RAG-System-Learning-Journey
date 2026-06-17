@@ -5,7 +5,7 @@ function ShowPicker({ shows, loading, onSelect, onAddShow }) {
   return (
     <div className="show-picker-overlay">
       <div className="show-picker-modal">
-        <h1>Frieren Grimoire</h1>
+        <h1>FandomWiki RAG</h1>
         <p className="picker-subtitle">Select a show to begin</p>
 
         {loading ? (
@@ -500,7 +500,7 @@ export default function App() {
       {/* ── Left: Chat ──────────────────────────────────────────────────── */}
       <div className="chat-pane">
         <div className="chat-header">
-          <h1>Frieren Grimoire</h1>
+          <h1>FandomWiki RAG</h1>
           <p>Chronicles Indexed with RAG · FAISS · Ollama</p>
           <div className="show-selector">
             <span className="current-show">{shows.find(s => s.id === selectedShow)?.name || selectedShow}</span>
