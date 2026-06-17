@@ -15,10 +15,14 @@ import os
 import re
 import json
 import time
+import shutil
 from pathlib import Path
 from typing import Any
 from contextlib import asynccontextmanager
+from urllib.parse import quote, urlparse
 
+import requests
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -61,6 +65,7 @@ _embeddings = None
 _default_retriever = None
 _dataset_retrievers: dict[str, Any] = {}
 _llm_chain = None   # PROMPT | llm | parser  (no retriever — timed separately)
+_SCRAPER_USER_AGENT = "FrierenRAG/1.0 (show builder)"
 
 
 def _find_shows_dir() -> Path:
@@ -84,6 +89,196 @@ def _format_docs(docs: list) -> str:
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "_", name.lower()).strip("_")
     return slug or "dataset"
+
+
+def _normalize_fandom_base(url: str) -> tuple[str, str]:
+    """
+    Convert any fandom URL to canonical base: https://{show}.fandom.com/wiki/
+    Returns (wiki_base, suggested_show_name).
+    """
+    raw = url.strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Fandom URL is required.")
+
+    if not re.match(r"^https?://", raw, flags=re.IGNORECASE):
+        raw = f"https://{raw}"
+
+    parsed = urlparse(raw)
+    host = parsed.netloc.lower()
+    if not host.endswith("fandom.com"):
+        raise HTTPException(status_code=400, detail="URL must point to a fandom.com wiki.")
+
+    labels = host.split(".")
+    if len(labels) < 3:
+        raise HTTPException(status_code=400, detail="Invalid fandom host format.")
+
+    show_key = labels[0]
+    if not show_key:
+        raise HTTPException(status_code=400, detail="Could not infer show name from URL.")
+
+    wiki_base = f"https://{show_key}.fandom.com/wiki/"
+    suggested_show_name = _slugify(show_key)
+    return wiki_base, suggested_show_name
+
+
+def _wiki_api_url(wiki_base: str) -> str:
+    parsed = urlparse(wiki_base)
+    return f"{parsed.scheme}://{parsed.netloc}/api.php"
+
+
+def _fetch_all_fandom_titles(wiki_base: str) -> list[str]:
+    api_url = _wiki_api_url(wiki_base)
+    headers = {"User-Agent": _SCRAPER_USER_AGENT}
+
+    titles: list[str] = []
+    apcontinue = None
+
+    while True:
+        params = {
+            "action": "query",
+            "list": "allpages",
+            "apnamespace": "0",
+            "aplimit": "max",
+            "format": "json",
+        }
+        if apcontinue:
+            params["apcontinue"] = apcontinue
+
+        response = requests.get(api_url, params=params, headers=headers, timeout=30)
+        response.raise_for_status()
+        payload = response.json()
+
+        page_titles = [p.get("title", "").strip() for p in payload.get("query", {}).get("allpages", [])]
+        titles.extend([t for t in page_titles if t])
+
+        continuation = payload.get("continue")
+        if not continuation:
+            break
+        apcontinue = continuation.get("apcontinue")
+        if not apcontinue:
+            break
+
+    seen = set()
+    unique_titles = []
+    for title in titles:
+        if title in seen:
+            continue
+        seen.add(title)
+        unique_titles.append(title)
+    return unique_titles
+
+
+def _fetch_page_content(wiki_base: str, title: str) -> tuple[str | None, str]:
+    api_url = _wiki_api_url(wiki_base)
+    headers = {"User-Agent": _SCRAPER_USER_AGENT}
+    params = {
+        "action": "parse",
+        "page": title,
+        "prop": "text",
+        "format": "json",
+    }
+
+    response = requests.get(api_url, params=params, headers=headers, timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+
+    html = payload.get("parse", {}).get("text", {}).get("*")
+    if not html:
+        return None, ""
+
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(separator=" ", strip=True)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    page_url = f"{wiki_base}{quote(title.replace(' ', '_'))}"
+    return text, page_url
+
+
+def _create_show_from_selected_titles(
+    fandom_url: str,
+    selected_titles: list[str],
+    show_name: str | None = None,
+) -> dict[str, Any]:
+    global _embeddings
+
+    if _embeddings is None:
+        raise HTTPException(status_code=503, detail="Embeddings are not ready yet. Try again in a moment.")
+
+    wiki_base, suggested_show_name = _normalize_fandom_base(fandom_url)
+    folder_name = _slugify(show_name or suggested_show_name)
+    if not folder_name:
+        raise HTTPException(status_code=400, detail="Show name is invalid.")
+
+    cleaned_titles = [t.strip() for t in selected_titles if t and t.strip()]
+    if not cleaned_titles:
+        raise HTTPException(status_code=400, detail="Select at least one chapter/page.")
+
+    shows_dir = _find_shows_dir()
+    shows_dir.mkdir(parents=True, exist_ok=True)
+    show_dir = shows_dir / folder_name
+
+    if show_dir.exists():
+        raise HTTPException(status_code=400, detail=f"Show '{folder_name}' already exists.")
+
+    show_dir.mkdir(parents=True, exist_ok=False)
+
+    records: list[dict[str, str]] = []
+    skipped = 0
+
+    try:
+        for title in cleaned_titles:
+            try:
+                content, page_url = _fetch_page_content(wiki_base, title)
+            except Exception:
+                skipped += 1
+                continue
+
+            if not content or len(content) < 80:
+                skipped += 1
+                continue
+
+            records.append({
+                "title": title,
+                "content": content,
+                "url": page_url,
+            })
+
+        if not records:
+            raise HTTPException(status_code=400, detail="No usable content found from selected pages.")
+
+        dataset_path = show_dir / "dataset.json"
+        with dataset_path.open("w", encoding="utf-8") as handle:
+            json.dump(records, handle, ensure_ascii=False, indent=2)
+
+        docs = _to_documents(records)
+        chunks = _chunk_documents(docs)
+        if not chunks:
+            raise HTTPException(status_code=400, detail="Selected pages did not produce enough content to index.")
+
+        vectorstore = FAISS.from_documents(chunks, _embeddings)
+        index_dir = show_dir / "faiss_index"
+        index_dir.mkdir(parents=True, exist_ok=True)
+        vectorstore.save_local(str(index_dir))
+
+        show_id = _slugify(folder_name)
+        _dataset_retrievers.pop(show_id, None)
+
+        return {
+            "id": show_id,
+            "name": folder_name,
+            "dataset_path": str(dataset_path),
+            "index_path": str(index_dir),
+            "kept_pages": len(records),
+            "skipped_pages": skipped,
+            "wiki_base": wiki_base,
+            "all_pages_url": f"{wiki_base}Special:AllPages",
+        }
+    except HTTPException:
+        shutil.rmtree(show_dir, ignore_errors=True)
+        raise
+    except Exception as exc:
+        shutil.rmtree(show_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create show: {exc}")
 
 
 def _show_records() -> list[dict]:
@@ -216,11 +411,61 @@ class ChatRequest(BaseModel):
     show: str | None = None
 
 
+class PreviewPagesRequest(BaseModel):
+    fandom_url: str
+    limit: int = 2000
+
+
+class CreateShowFromFandomRequest(BaseModel):
+    fandom_url: str
+    selected_titles: list[str]
+    show_name: str | None = None
+
+
 @app.get("/shows")
 async def shows():
     items = _show_records()
     return {
         "shows": [{"id": s["id"], "name": s["name"]} for s in items],
+    }
+
+
+@app.post("/shows/preview-pages")
+async def preview_pages(req: PreviewPagesRequest):
+    wiki_base, suggested_show_name = _normalize_fandom_base(req.fandom_url)
+
+    try:
+        titles = _fetch_all_fandom_titles(wiki_base)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not load page list from fandom wiki: {exc}")
+
+    safe_limit = max(50, min(req.limit, 5000))
+    limited_titles = titles[:safe_limit]
+
+    return {
+        "wiki_base": wiki_base,
+        "all_pages_url": f"{wiki_base}Special:AllPages",
+        "suggested_show_name": suggested_show_name,
+        "total_pages": len(titles),
+        "returned_pages": len(limited_titles),
+        "truncated": len(titles) > len(limited_titles),
+        "pages": [{"title": title} for title in limited_titles],
+    }
+
+
+@app.post("/shows/create-from-fandom")
+async def create_show_from_fandom(req: CreateShowFromFandomRequest):
+    show = _create_show_from_selected_titles(
+        fandom_url=req.fandom_url,
+        selected_titles=req.selected_titles,
+        show_name=req.show_name,
+    )
+    return {
+        "message": "Show created successfully.",
+        "show": {"id": show["id"], "name": show["name"]},
+        "kept_pages": show["kept_pages"],
+        "skipped_pages": show["skipped_pages"],
+        "all_pages_url": show["all_pages_url"],
     }
 
 

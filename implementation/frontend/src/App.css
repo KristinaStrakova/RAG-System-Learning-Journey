@@ -67,6 +67,10 @@ body {
   animation: modalSlideIn 0.4s ease-out;
 }
 
+.add-show-modal {
+  max-width: 760px;
+}
+
 .show-picker-modal h1 {
   font-family: 'Cinzel', 'Times New Roman', serif;
   font-size: 2rem;
@@ -137,7 +141,11 @@ body {
   font-weight: 600;
 }
 
-.picker-confirm-btn {
+.add-show-btn,
+.create-show-btn,
+.back-btn,
+.chapter-toolbar button,
+.add-show-input-row button {
   padding: 14px 32px;
   background: linear-gradient(145deg, #7a4721, #552e15);
   color: #f6e7c6;
@@ -151,15 +159,92 @@ body {
   text-transform: uppercase;
 }
 
-.picker-confirm-btn:hover:not(:disabled) {
+.add-show-btn:hover:not(:disabled),
+.create-show-btn:hover:not(:disabled),
+.back-btn:hover:not(:disabled),
+.chapter-toolbar button:hover:not(:disabled),
+.add-show-input-row button:hover:not(:disabled) {
   transform: translateY(-2px);
   filter: brightness(1.1);
   box-shadow: 0 8px 20px rgba(61, 34, 16, 0.35);
 }
 
-.picker-confirm-btn:disabled {
+.add-show-btn:disabled,
+.create-show-btn:disabled,
+.back-btn:disabled,
+.chapter-toolbar button:disabled,
+.add-show-input-row button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.add-show-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+}
+
+.add-show-input-row input,
+.chapter-toolbar input {
+  width: 100%;
+  border: 1px solid rgba(93, 58, 31, 0.35);
+  background: rgba(250, 240, 220, 0.72);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.95rem;
+}
+
+.chapter-toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.chapter-toolbar button,
+.add-show-input-row button,
+.back-btn {
+  padding: 10px 12px;
+  font-size: 0.72rem;
+}
+
+.chapter-count {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+}
+
+.chapter-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid rgba(93, 58, 31, 0.25);
+  border-radius: 10px;
+  background: rgba(250, 240, 220, 0.42);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.chapter-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: var(--ink-soft);
+}
+
+.chapter-item:hover {
+  background: rgba(167, 127, 44, 0.12);
+}
+
+.chapter-item input {
+  accent-color: var(--oak);
+}
+
+.create-show-btn {
+  margin-top: 2px;
 }
 
 @keyframes modalSlideIn {
@@ -742,6 +827,13 @@ body {
 
   .bubble {
     max-width: 85%;
+  }
+}
+
+@media (max-width: 768px) {
+  .add-show-input-row,
+  .chapter-toolbar {
+    grid-template-columns: 1fr;
   }
 }
 
