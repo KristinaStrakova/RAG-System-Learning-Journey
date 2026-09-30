@@ -421,6 +421,7 @@ body {
 .create-show-btn,
 .back-btn,
 .chapter-toolbar button,
+.chapter-pagination button,
 .add-show-input-row button {
   padding: 14px 32px;
   background: var(--button-bg);
@@ -456,6 +457,7 @@ body {
 .create-show-btn:hover:not(:disabled),
 .back-btn:hover:not(:disabled),
 .chapter-toolbar button:hover:not(:disabled),
+.chapter-pagination button:hover:not(:disabled),
 .add-show-input-row button:hover:not(:disabled) {
   transform: translateY(-2px);
   filter: brightness(1.1);
@@ -466,6 +468,7 @@ body {
 .create-show-btn:disabled,
 .back-btn:disabled,
 .chapter-toolbar button:disabled,
+.chapter-pagination button:disabled,
 .add-show-input-row button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
@@ -576,11 +579,30 @@ body {
   font-size: 0.85rem;
 }
 
+.chapter-pagination {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.chapter-pagination .action-btn {
+  padding: 8px 10px;
+  font-size: 0.68rem;
+}
+
+.chapter-pagination-info {
+  text-align: center;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
+}
+
 .chapter-list {
   height: clamp(240px, 34dvh, 380px);
   min-height: 220px;
   max-height: 420px;
   overflow-y: auto;
+  resize: vertical;
   border: 1px solid rgba(93, 58, 31, 0.25);
   border-radius: 10px;
   background: rgba(250, 240, 220, 0.42);
@@ -662,8 +684,12 @@ body {
 }
 
 .scrape-progress-log {
-  max-height: 140px;
+  height: 180px;
+  max-height: 240px;
   overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
   border: 1px solid rgba(93, 58, 31, 0.2);
   background: rgba(255, 248, 230, 0.56);
   border-radius: 8px;
@@ -671,6 +697,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.scrape-progress-log::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrape-progress-log::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 8px;
 }
 
 .scrape-progress-item {
@@ -747,6 +782,14 @@ body {
   .chapter-toolbar button,
   .add-show-actions button {
     width: 100%;
+  }
+
+  .chapter-pagination {
+    grid-template-columns: 1fr;
+  }
+
+  .chapter-pagination-info {
+    text-align: left;
   }
 
   .add-show-modal {

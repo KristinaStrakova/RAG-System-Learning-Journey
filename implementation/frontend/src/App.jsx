@@ -80,12 +80,28 @@ function AddShowPanel({
   theme,
   onThemeChange,
 }) {
+  const PAGE_SIZE = 100
   const filteredPages = pageFilter.trim()
     ? pages.filter(page => page.title.toLowerCase().includes(pageFilter.toLowerCase()))
     : pages
+  const [currentPage, setCurrentPage] = useState(1)
+  const totalPages = Math.max(1, Math.ceil(filteredPages.length / PAGE_SIZE))
+  const pageStart = (currentPage - 1) * PAGE_SIZE
+  const pageEnd = pageStart + PAGE_SIZE
+  const pagedPages = filteredPages.slice(pageStart, pageEnd)
   const progressPct = createProgress?.total
     ? Math.round((createProgress.current / createProgress.total) * 100)
     : 0
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [pageFilter, pages.length])
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages)
+    }
+  }, [currentPage, totalPages])
 
   return (
     <div className={`show-picker-overlay add-show-overlay theme-${theme}`}>
@@ -156,8 +172,8 @@ function AddShowPanel({
               />
               <button
                 className="action-btn action-secondary"
-                onClick={onSelectAllFiltered}
-                disabled={filteredPages.length === 0 || creatingShow}
+                onClick={() => onSelectAllFiltered(pagedPages)}
+                disabled={pagedPages.length === 0 || creatingShow}
               >
                 <span className="btn-icon">+ </span>
                 <span className="btn-label">Select visible</span>
@@ -173,11 +189,36 @@ function AddShowPanel({
             </div>
 
             <div className="chapter-count">
-              {selectedTitles.size} selected / {pages.length} total
+              {selectedTitles.size} selected / {pages.length} total | page {currentPage} of {totalPages}
+              {pagesLoading ? ' | loading more chapters...' : ''}
+            </div>
+
+            <div className="chapter-pagination">
+              <button
+                className="action-btn action-secondary"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={creatingShow || currentPage === 1}
+              >
+                <span className="btn-icon">&lt; </span>
+                <span className="btn-label">Prev 100</span>
+              </button>
+
+              <span className="chapter-pagination-info">
+                Showing {filteredPages.length === 0 ? 0 : pageStart + 1}-{Math.min(pageEnd, filteredPages.length)} of {filteredPages.length}
+              </span>
+
+              <button
+                className="action-btn action-secondary"
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={creatingShow || currentPage >= totalPages}
+              >
+                <span className="btn-label">Next 100</span>
+                <span className="btn-icon">&gt; </span>
+              </button>
             </div>
 
             <div className="chapter-list">
-              {filteredPages.map(page => (
+              {pagedPages.map(page => (
                 <label key={page.title} className="chapter-item">
                   <input
                     type="checkbox"
@@ -197,7 +238,7 @@ function AddShowPanel({
                 disabled={selectedTitles.size === 0 || creatingShow}
               >
                 <span className="btn-icon">* </span>
-                <span className="btn-label">{creatingShow ? 'Creating show…' : 'Create show from selected chapters'}</span>
+                <span className="btn-label">{creatingShow ? 'Creating chat…' : 'Create chat from selected chapters'}</span>
               </button>
             </div>
 
@@ -449,11 +490,8 @@ export default function App() {
     })
   }
 
-  const handleSelectAllFiltered = () => {
-    const visible = pageFilter.trim()
-      ? pages.filter(page => page.title.toLowerCase().includes(pageFilter.toLowerCase()))
-      : pages
-
+  const handleSelectAllFiltered = (visiblePages) => {
+    const visible = visiblePages ?? []
     setSelectedTitles(prev => {
       const next = new Set(prev)
       visible.forEach(page => next.add(page.title))
@@ -475,17 +513,45 @@ export default function App() {
     setSelectedTitles(new Set())
 
     try {
-      const res = await fetch('/shows/preview-pages', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fandom_url: url }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) {
-        throw new Error(data.detail || `HTTP ${res.status}`)
+      const seenTitles = new Set()
+      let apcontinue = null
+      let firstBatch = true
+
+      while (true) {
+        const res = await fetch('/shows/preview-pages/chunk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fandom_url: url,
+            apcontinue,
+            batch_size: 200,
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          throw new Error(data.detail || `HTTP ${res.status}`)
+        }
+
+        const chunkPages = (data.pages ?? []).filter(page => {
+          if (!page?.title || seenTitles.has(page.title)) return false
+          seenTitles.add(page.title)
+          return true
+        })
+
+        if (chunkPages.length > 0) {
+          setPages(prev => [...prev, ...chunkPages])
+        }
+
+        if (firstBatch) {
+          setShowName(prev => prev.trim() ? prev : (data.suggested_show_name ?? ''))
+          firstBatch = false
+        }
+
+        apcontinue = data.next_apcontinue ?? null
+        if (data.done || !apcontinue) {
+          break
+        }
       }
-      setPages(data.pages ?? [])
-      setShowName(prev => prev.trim() ? prev : (data.suggested_show_name ?? ''))
     } catch (err) {
       setAddShowError(err.message ?? 'Could not load chapters from the provided URL.')
     } finally {
@@ -583,7 +649,7 @@ export default function App() {
             if (event.type === 'progress' && (event.stage === 'kept' || event.stage === 'skipped')) {
               setProcessedChapters(prev => {
                 const next = [{ title: event.title, stage: event.stage }, ...prev]
-                return next.slice(0, 8)
+                return next.slice(0, 1000)
               })
             }
           }
@@ -608,7 +674,7 @@ export default function App() {
       setProcessedChapters([])
       handleShowSelect(createdShow.id || '')
     } catch (err) {
-      setAddShowError(err.message ?? 'Could not create show from selected chapters.')
+      setAddShowError(err.message ?? 'Could not create chat from selected chapters.')
     } finally {
       setCreatingShow(false)
     }

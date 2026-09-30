@@ -47,9 +47,9 @@ CHUNK_OVERLAP = 100
 
 PROMPT = PromptTemplate(
     input_variables=["context", "question"],
-    template="""You are a helpful assistant who answers questions about the anime and manga series "Frieren: Beyond Journey's End".
-Use ONLY the information in the context passages below to answer.
-If the answer is not in the context, say "I don't have enough information about that in the wiki."
+    template="""You are a helpful assistant.
+Answer the user's question using ONLY the provided context passages.
+If the answer is not in the context, say "I don't have enough information in the provided context."
 Always be concise and friendly.
 
 Context:
@@ -167,6 +167,35 @@ def _fetch_all_fandom_titles(wiki_base: str) -> list[str]:
         seen.add(title)
         unique_titles.append(title)
     return unique_titles
+
+
+def _fetch_fandom_titles_chunk(
+    wiki_base: str,
+    apcontinue: str | None = None,
+    batch_size: int = 200,
+) -> tuple[list[str], str | None]:
+    api_url = _wiki_api_url(wiki_base)
+    headers = {"User-Agent": _SCRAPER_USER_AGENT}
+    safe_batch_size = max(10, min(batch_size, 500))
+
+    params = {
+        "action": "query",
+        "list": "allpages",
+        "apnamespace": "0",
+        "aplimit": str(safe_batch_size),
+        "format": "json",
+    }
+    if apcontinue:
+        params["apcontinue"] = apcontinue
+
+    response = requests.get(api_url, params=params, headers=headers, timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+
+    page_titles = [p.get("title", "").strip() for p in payload.get("query", {}).get("allpages", [])]
+    titles = [t for t in page_titles if t]
+    next_apcontinue = payload.get("continue", {}).get("apcontinue")
+    return titles, next_apcontinue
 
 
 def _fetch_page_content(wiki_base: str, title: str) -> tuple[str | None, str]:
@@ -564,6 +593,12 @@ class PreviewPagesRequest(BaseModel):
     limit: int = 2000
 
 
+class PreviewPagesChunkRequest(BaseModel):
+    fandom_url: str
+    apcontinue: str | None = None
+    batch_size: int = 200
+
+
 class CreateShowFromFandomRequest(BaseModel):
     fandom_url: str
     selected_titles: list[str]
@@ -598,6 +633,31 @@ async def preview_pages(req: PreviewPagesRequest):
         "returned_pages": len(limited_titles),
         "truncated": len(titles) > len(limited_titles),
         "pages": [{"title": title} for title in limited_titles],
+    }
+
+
+@app.post("/shows/preview-pages/chunk")
+async def preview_pages_chunk(req: PreviewPagesChunkRequest):
+    wiki_base, suggested_show_name = _normalize_fandom_base(req.fandom_url)
+
+    try:
+        titles, next_apcontinue = _fetch_fandom_titles_chunk(
+            wiki_base=wiki_base,
+            apcontinue=req.apcontinue,
+            batch_size=req.batch_size,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not load page chunk from fandom wiki: {exc}")
+
+    return {
+        "wiki_base": wiki_base,
+        "all_pages_url": f"{wiki_base}Special:AllPages",
+        "suggested_show_name": suggested_show_name,
+        "batch_size": max(10, min(req.batch_size, 500)),
+        "returned_pages": len(titles),
+        "next_apcontinue": next_apcontinue,
+        "done": not bool(next_apcontinue),
+        "pages": [{"title": title} for title in titles],
     }
 
 

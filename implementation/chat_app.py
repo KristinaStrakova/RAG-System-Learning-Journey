@@ -36,9 +36,9 @@ CHUNK_OVERLAP = 100
 
 PROMPT = PromptTemplate(
     input_variables=["context", "question"],
-    template="""You are a helpful assistant who answers questions about the anime and manga series "Frieren: Beyond Journey's End".
-Use ONLY the information in the context passages below to answer.
-If the answer is not in the context, say "I don't have enough information about that in the wiki."
+    template="""You are a helpful assistant.
+Answer the user's question using ONLY the provided context passages.
+If the answer is not in the context, say "I don't have enough information in the provided context."
 Always be concise and friendly.
 
 Context:
